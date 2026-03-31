@@ -32,6 +32,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent))
 from fetcher import load_articles, run_pipeline, save_articles

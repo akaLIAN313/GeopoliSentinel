@@ -30,6 +30,9 @@ from pathlib import Path
 
 import anthropic
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).parent))
 from prompts import load_bootstrap_system_prompt, SUBMIT_ANALYSIS_TOOL
