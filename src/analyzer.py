@@ -36,7 +36,7 @@ import anthropic
 sys.path.insert(0, str(Path(__file__).parent))
 from fetcher import load_articles, run_pipeline, save_articles
 from models import Article, ResonanceReport
-from prompts import DAILY_SYSTEM_PROMPT, SUBMIT_ANALYSIS_TOOL
+from prompts import load_daily_system_prompt, SUBMIT_ANALYSIS_TOOL
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ def run_analysis(articles: list[Article]) -> ResonanceReport:
         model="claude-opus-4-6",
         max_tokens=4096,
         thinking={"type": "adaptive"},          # lets Claude reason before scoring
-        system=DAILY_SYSTEM_PROMPT,              # war theory + output instructions
+        system=load_daily_system_prompt(),        # war theory + output instructions
         tools=[SUBMIT_ANALYSIS_TOOL],            # enforces schema via tool use
         tool_choice={"type": "tool", "name": "submit_analysis"},  # must call exactly this
         messages=[{"role": "user", "content": user_message}],
