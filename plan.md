@@ -14,26 +14,42 @@
 
 ## 1. 核心架构与技术栈
 
+**正常运行（每日循环）**:
 ```
 [数据源: RSS + NewsAPI]
         ↓
-[Phase 1: 抓取 & 过滤 & 去重]
-        ↓ JSON
-[Phase 2: AI 分析引擎]
-        ↓ Pydantic 结构化输出
+[Phase 1: 抓取 & 过滤 & 去重 → articles.json (delta)]
+        ↓
+[Phase 2: Claude API]
+  System Prompt: 转移视线战争理论（硬编码）
+  User Context:  state.md（滚动状态）+ articles.json（当日增量）
+        ↓
+  输出: 新 state.md + report.json
+        ↓
 [Phase 3: Telegram 推送]
         ↑
 [Phase 4: GitHub Actions Cron 触发]
 ```
 
+**冷启动（仅首次，`state.md` 不存在时）**:
+```
+[bootstrap.py — Claude Agent with web_search tool]
+  System Prompt: 转移视线战争理论（硬编码，与日常相同）
+  工具:          web_search（Claude 自主决定搜索议题和查询词）
+  搜索议程:      系统提示中指定5个必须覆盖的调研方向
+        ↓
+  输出: 初始 state.md（含历史深度，供日常循环使用）
+```
+
 **技术栈**:
 - **语言**: Python 3.12
-- **数据获取**: `feedparser` (RSS), `requests` (NewsAPI), `httpx` (异步备选)
+- **数据获取**: `feedparser` (RSS), `requests` (NewsAPI)
 - **数据结构化**: `pydantic v2`（严格定义 AI 输出 schema）
-- **AI 引擎**: `anthropic` (Claude API) 主力，`google-genai` (Gemini) 备用
+- **AI 引擎（日常）**: `anthropic` Claude API，tool use 强制结构化输出；`google-genai` Gemini 作 fallback
+- **AI 引擎（冷启动）**: `anthropic` Claude API + `web_search` 内置工具，agentic loop
 - **推送端**: `python-telegram-bot >= 20.0`（异步版本）
 - **自动化**: GitHub Actions Cron
-- **本地持久化（运行间）**: JSON 文件存入 GitHub Actions Artifacts，或写回 repo 的 `data/` 目录
+- **持久化**: `data/` 目录通过 `git commit` 写回仓库
 
 ## 2. Phase 1: 数据抓取管道 (Data Pipeline)
 
@@ -197,61 +213,83 @@ Day N+1:
 3. **CRI 走势只保留最近 7 天**：足够看出趋势，不会无限增长。
 4. **原始文章不存入状态**：状态文档只存 AI 的分析结论，不存原始新闻文本。
 
-**冷启动处理（Bootstrap Pass）**：
+**冷启动处理（Bootstrap Pass — ADR-002）**：
 
-直接用当日增量文章启动会产生一个"空心"状态文档——AI 不知道审判进行到第几周、伊朗经济崩溃的基线在哪里、哪些事件是慢性背景噪声而哪些是真正的新增信号。正确的冷启动方式是在首次每日循环前，进行一次独立的**历史语境引导（Bootstrap Pass）**，生成一份有历史深度的初始 `state.md`。
+直接用当日增量启动会产生"空心"状态文档——AI 不知道审判进行到第几周、伊朗经济崩溃的基线在哪里、哪些事件是慢性背景噪声。冷启动通过让 Claude 自主搜索来解决这个问题，无需手动维护文档库。
 
-Bootstrap Pass 由独立脚本 `src/bootstrap.py` 执行，**仅在 `data/state.md` 不存在时运行**（或通过 `--force` 参数强制重跑）。
+Bootstrap Pass 由独立脚本 `src/bootstrap.py` 执行，**仅在 `data/state.md` 不存在时运行**（或通过 `--force` 参数强制重跑，例如地缘格局发生重大变化时）。
 
-**Bootstrap 信息源（分两类）**：
+**两类输入的不同处理方式**：
 
-*类型 A — 背景知识文档（静态，手动维护于 `bootstrap/docs/`）*
+*转移视线战争理论（硬编码进系统提示）*
 
-这类文档描述的是结构性背景，不会每天变化，适合手动整理一次：
+战争理论是分析框架，不是数据——它描述的是"内部生存压力如何转化为对外冲突意愿"的逻辑结构，本身不会随新闻变化。将其硬编码进 system prompt 有以下好处：
+- 无需 API 调用获取
+- 每次运行（含日常循环）都自动携带，不依赖 `state.md` 是否包含它
+- 版本由 git 管理（修改理论 = 修改代码，有完整历史）
 
-| 文档 | 建议来源 | 描述 |
-|------|---------|------|
-| `israel_political_crisis.md` | Wikipedia "2023–24 Israeli judicial crisis", Foreign Affairs | 司法改革危机始末、内塔尼亚胡审判进展、极右翼联盟结构 |
-| `iran_economic_state.md` | IMF reports, Atlantic Council | 里亚尔汇率崩溃历史、通胀数据基线、制裁影响 |
-| `irgc_power_structure.md` | RAND Corporation, Brookings | IRGC 在伊朗政治中的角色、最高领袖继承危机背景 |
-| `us_iran_timeline.md` | Wikipedia "Iran–United States relations" | 关键历史节点（JCPOA 退出、苏莱曼尼刺杀、2024核谈判） |
-| `diversionary_war_theory.md` | 学术摘要 | 转移视线战争理论的核心逻辑与历史案例，作为 AI 的分析框架基础 |
-
-这些文档放入 `bootstrap/docs/`，通过 git 管理，可按需手动更新。
-
-*类型 B — 近期历史新闻（动态，由脚本抓取）*
-
-运行 `src/bootstrap.py` 时，脚本自动从同一批 RSS/NewsAPI 源抓取过去 **30 天**的符合过滤条件的历史文章（而非 24 小时），作为近期上下文输入。
-
-**Bootstrap 处理流程（两阶段压缩）**：
-
-直接将所有背景文档 + 30 天文章塞入单次 API 调用会超出 context window，需分阶段处理：
-
+系统提示中应包含的理论要素：
 ```
-阶段 1 — 分块摘要（map）:
-  对每份背景文档 → 调用 AI，输出该文档的核心要点摘要（≤200字）
-  对 30 天历史文章，按数据流 A/B/C 分组 → 每组调用一次 AI，输出该数据流的近期态势摘要（≤300字）
-
-  输出: 每份文档/分组一个摘要片段
-
-阶段 2 — 状态合成（reduce）:
-  将所有摘要片段合并（总计约 2,000 tokens）→ 调用一次 AI
-  System Prompt 要求: "基于以下背景材料和近期动态，生成一份符合规定格式的初始状态文档"
-  输出: 初始 data/state.md，包含完整的以色列/伊朗压力态势、背景理论框架，以及对近期30天走势的初步 CRI 评分序列
+分析框架：转移视线战争理论（Diversionary War Theory）
+- 核心命题：当领导人面临国内政治生存威胁时，发动或升级对外冲突的概率上升
+- 适用条件：领导人个人（非国家）面临审判/政变/革命威胁；国内经济或社会危机达到临界点
+- 历史参照：[2-3个简短案例，如阿根廷马岛战争、伊朗1980年两伊战争]
+- 本系统监测逻辑：以色列方向追踪内塔尼亚胡个人政治生存；伊朗方向追踪最高领袖政权稳定性
+- 双高压力假设：两国同时存在高强度内部压力时，双方均有转移视线动机，冲突风险非线性上升
 ```
 
-总计 API 调用次数：约 6-8 次（一次性操作，成本约 $0.01-0.05）
+*当前地缘现实（Claude agent + web_search 动态获取）*
+
+Bootstrap 脚本启动一个 agentic loop：Claude 收到系统提示（含战争理论）后，使用 `web_search` 工具自主搜索当前地缘状态，直到覆盖所有指定调研方向为止。
+
+**系统提示中明确要求 Claude 必须覆盖的5个调研方向**：
+
+```
+在生成初始状态文档前，你必须通过 web_search 工具完成以下5个方向的调研，
+每个方向至少执行1次有效搜索：
+
+1. 以色列内政危机现状
+   搜索议题：内塔尼亚胡审判最新进展、本-格维尔/斯莫特里奇联盟稳定性、
+             以色列国内抗议动态
+
+2. 伊朗政权稳定性现状
+   搜索议题：里亚尔/土曼汇率、通货膨胀数据、IRGC内部动向、
+             哈梅内伊健康状况与继承人问题
+
+3. 美伊/以伊近期外交与军事信号
+   搜索议题：过去90天内的重大军事事件、外交接触或破裂、制裁动态
+
+4. 伊朗核谈判状态
+   搜索议题：JCPOA谈判现状、铀浓缩进展、IAEA报告摘要
+
+5. 地区代理人网络动态
+   搜索议题：真主党、胡塞武装、伊拉克什叶派民兵最新动态
+
+完成调研后，将所有发现整合为一份初始状态文档（格式见规范）。
+```
+
+**Bootstrap 执行流程**：
+
+```
+bootstrap.py 启动:
+  1. 从 src/prompts.py 加载硬编码的 system prompt（含战争理论 + 调研议程）
+  2. 启动 Claude API agentic loop（messages=[], tools=[web_search]）
+  3. Claude 自主执行搜索，直到5个方向均已覆盖
+  4. Claude 输出初始 state.md（使用与日常循环相同的状态文档 schema）
+  5. 将结果写入 data/state.md
+  6. 退出，控制权交还 analyzer.py
+
+估计 API 调用次数：5-15 次 tool call（一次性操作，成本约 $0.05-0.20）
+```
 
 **Bootstrap 触发逻辑（`analyzer.py` 中）**：
 ```
 if not exists("data/state.md"):
-    print("No state document found. Running bootstrap pass first...")
-    run bootstrap.py
-    assert exists("data/state.md"), "Bootstrap failed"
-proceed with normal daily analysis using new state.md + today's delta
+    run bootstrap.py  # 自主搜索 → 生成初始 state.md
+proceed with normal daily analysis using state.md + today's delta
 ```
 
-**Bootstrap 的 `bootstrap/docs/` 目录也纳入 git 管理**，确保在 GitHub Actions 环境中可直接访问（无需额外下载）。文档建议在首次部署前手动更新到当前时间节点。
+`bootstrap/docs/` 目录不再需要，`bootstrap/` 仅保留 `src/prompts.py` 中的硬编码理论文本。
 
 **状态文档的持久化**：
 - `data/state.md` 随每日分析结果一起通过 `git commit` 写回仓库（见第 5.1 节）
@@ -344,11 +382,11 @@ proceed with normal daily analysis using new state.md + today's delta
 
 | Secret 名称 | 说明 | 获取方式 |
 |------------|------|---------|
-| `ANTHROPIC_API_KEY` | Claude API 密钥 | console.anthropic.com |
+| `ANTHROPIC_API_KEY` | Claude API 密钥（日常分析 + bootstrap web_search agent） | console.anthropic.com |
 | `TELEGRAM_BOT_TOKEN` | Bot Token | @BotFather on Telegram |
 | `TELEGRAM_CHAT_ID` | 目标 Chat/Channel ID | @userinfobot 或 @getidsbot |
 | `NEWS_API_KEY` | NewsAPI 密钥（可选） | newsapi.org |
-| `GEMINI_API_KEY` | Gemini API 密钥（备用 AI） | aistudio.google.com |
+| `GEMINI_API_KEY` | Gemini API 密钥（日常分析 fallback，bootstrap 不使用） | aistudio.google.com |
 
 ### 5.3 workflow 文件结构（补充）
 
@@ -414,9 +452,11 @@ sentinel_US-Iran/
 │   └── workflows/
 │       └── main.yml
 ├── src/
-│   ├── fetcher.py          # Phase 1: RSS + NewsAPI 抓取与过滤
-│   ├── analyzer.py         # Phase 2: AI 引擎，读取 articles.json，输出 report.json
+│   ├── fetcher.py          # Phase 1: RSS + NewsAPI 抓取与过滤，输出当日增量
+│   ├── analyzer.py         # Phase 2: 日常 AI 分析；检测到无 state.md 时自动调用 bootstrap.py
+│   ├── bootstrap.py        # 冷启动：Claude agent + web_search，生成初始 state.md
 │   ├── notifier.py         # Phase 3: Telegram 推送
+│   ├── prompts.py          # 硬编码系统提示（战争理论框架 + bootstrap 调研议程，两者共用）
 │   └── models.py           # Pydantic schemas (Article, ResonanceReport)
 ├── data/
 │   ├── articles.json       # Phase 1 → Phase 2 中间产物（每次覆盖，当日增量）
@@ -450,11 +490,11 @@ Phase 间通过文件传递数据（articles.json → analyzer.py → report.jso
 
 ## 8. Claude Code 执行指令（修订）
 
-按以下顺序逐步实现，每个 Phase 完成后等待确认再进入下一个：
+按以下顺序逐步实现，每个步骤完成后等待确认再进入下一步：
 
-1. **Phase 1**: 创建 `src/models.py`（Article schema），然后实现 `src/fetcher.py`，输出 `data/articles.json`
-2. **Phase 2**: 实现 `src/analyzer.py`，使用 tool use 强制结构化输出，输出 `data/latest_report.json` 和 `data/history/YYYY-MM-DD.json`
-3. **Phase 3**: 实现 `src/notifier.py`，消息模板见第 4.2 节
-4. **Phase 4**: 生成 `requirements.txt`，编写 `.github/workflows/main.yml`，补充 `README.md`
-
-在开始编写代码前，请确认你是否理解了**"通过内部政治压力预测外部冲突"**这一核心逻辑，并在得到确认后从 Phase 1 开始。
+1. **共享基础**: 创建 `src/models.py`（Article、ResonanceReport schema）和 `src/prompts.py`（战争理论系统提示 + bootstrap 调研议程）
+2. **Phase 1**: 实现 `src/fetcher.py`，输出 `data/articles.json`（当日增量）
+3. **Bootstrap**: 实现 `src/bootstrap.py`，Claude agent + web_search agentic loop，生成初始 `data/state.md`；本地手动测试通过后再继续
+4. **Phase 2**: 实现 `src/analyzer.py`，日常分析循环（state.md + articles.json → 新 state.md + report.json）；自动检测并触发 bootstrap
+5. **Phase 3**: 实现 `src/notifier.py`，消息模板见第 4.2 节
+6. **Phase 4**: 生成 `requirements.txt`，编写 `.github/workflows/main.yml`，注意 bootstrap 在 Actions 环境中的 timeout 设置（建议 bootstrap 单独给 15 分钟）
