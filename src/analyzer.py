@@ -181,7 +181,6 @@ def run_analysis(articles: list[Article]) -> ResonanceReport:
     response = client.messages.create(
         model="claude-opus-4-6",
         max_tokens=4096,
-        thinking={"type": "adaptive"},          # lets Claude reason before scoring
         system=load_daily_system_prompt(),        # war theory + output instructions
         tools=[SUBMIT_ANALYSIS_TOOL],            # enforces schema via tool use
         tool_choice={"type": "tool", "name": "submit_analysis"},  # must call exactly this
