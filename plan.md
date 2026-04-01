@@ -238,49 +238,49 @@ Bootstrap Pass 由独立脚本 `src/bootstrap.py` 执行，**仅在 `data/state.
 - 双高压力假设：两国同时存在高强度内部压力时，双方均有转移视线动机，冲突风险非线性上升
 ```
 
-*当前地缘现实（Claude agent + web_search 动态获取）*
+*当前地缘现实（Perplexity API 定向查询 + Claude 合成）*
 
-Bootstrap 脚本启动一个 agentic loop：Claude 收到系统提示（含战争理论）后，使用 `web_search` 工具自主搜索当前地缘状态，直到覆盖所有指定调研方向为止。
+Bootstrap 采用**脚本化查询**而非完全自主的 agentic loop。原因：5个调研方向已明确定义，不需要 Claude 自行决定搜索什么；Perplexity 对"当前X的状态是什么"类问题的合成质量显著优于通用 web_search。
 
-**系统提示中明确要求 Claude 必须覆盖的5个调研方向**：
+**架构决策记录 (ADR-003)**：Bootstrap 使用 **Tavily**，日常分析不使用任何搜索——两者职责不同，工具不同。
+
+**为何选 Tavily 而非 Perplexity 或直接爬取**：
+- ISW / ICG 部署了 Cloudflare，`requests` 直接爬取会被拦截；Tavily 绕过此问题并返回完整提取文本
+- Tavily 支持 `include_domains` 参数，可将前两个方向锁定到 ISW / ICG，保证权威来源
+- 单一 API、统一代码模式，比 feedparser + Perplexity 混合更简洁
+- 每次 bootstrap 费用约 $0.02-0.05（运行频率极低）
+
+**执行方式**：
+- 针对5个方向各构造1条 Tavily 查询（query 由代码硬定义，非 Claude 自由决定）
+- 前2个方向通过 `include_domains` 锁定 ISW / ICG；后3个方向为开放网络检索
+- 将5条查询结果拼接为上下文，一次性交给 Claude 调用 `submit_analysis` 生成初始状态文档
+- Claude 在此步骤只做**合成**，不做搜索
+
+**5个 Tavily 查询（英文，含域名锁定）**：
 
 ```
-在生成初始状态文档前，你必须通过 web_search 工具完成以下5个方向的调研，
-每个方向至少执行1次有效搜索：
-
-1. 以色列内政危机现状
-   搜索议题：内塔尼亚胡审判最新进展、本-格维尔/斯莫特里奇联盟稳定性、
-             以色列国内抗议动态
-
-2. 伊朗政权稳定性现状
-   搜索议题：里亚尔/土曼汇率、通货膨胀数据、IRGC内部动向、
-             哈梅内伊健康状况与继承人问题
-
-3. 美伊/以伊近期外交与军事信号
-   搜索议题：过去90天内的重大军事事件、外交接触或破裂、制裁动态
-
-4. 伊朗核谈判状态
-   搜索议题：JCPOA谈判现状、铀浓缩进展、IAEA报告摘要
-
-5. 地区代理人网络动态
-   搜索议题：真主党、胡塞武装、伊拉克什叶派民兵最新动态
-
-完成调研后，将所有发现整合为一份初始状态文档（格式见规范）。
+1. [domain:understandingwar.org] Iran Iraq Syria Hezbollah Houthi militia military activity IRGC US CENTCOM strikes latest
+2. [domain:crisisgroup.org]      Israel Iran Middle East conflict crisis analysis latest
+3. [open web]  Netanyahu corruption trial Ben-Gvir Smotrich coalition collapse Israel protest 2025
+4. [open web]  Iranian Rial exchange rate inflation IRGC economy Khamenei succession protest 2025
+5. [open web]  Iran JCPOA nuclear deal uranium enrichment IAEA report 2025
 ```
 
 **Bootstrap 执行流程**：
 
 ```
 bootstrap.py 启动:
-  1. 从 src/prompts.py 加载硬编码的 system prompt（含战争理论 + 调研议程）
-  2. 启动 Claude API agentic loop（messages=[], tools=[web_search]）
-  3. Claude 自主执行搜索，直到5个方向均已覆盖
-  4. Claude 输出初始 state.md（使用与日常循环相同的状态文档 schema）
+  1. 从 knowledges/ 加载 system prompt（含战争理论 + 调研议程）
+  2. 并发调用 Perplexity API，执行5条定向查询
+  3. 将5条查询结果格式化为用户消息上下文
+  4. 调用 Claude API（tool_choice=submit_analysis），Claude 合成初始状态文档
   5. 将结果写入 data/state.md
   6. 退出，控制权交还 analyzer.py
 
-估计 API 调用次数：5-15 次 tool call（一次性操作，成本约 $0.05-0.20）
+估计 API 调用次数：5次 Perplexity + 1次 Claude（一次性操作，成本约 $0.05-0.15）
 ```
+
+**所需新增 Secret**：`PERPLEXITY_API_KEY`（仅 bootstrap 使用）
 
 **Bootstrap 触发逻辑（`analyzer.py` 中）**：
 ```
@@ -387,6 +387,7 @@ proceed with normal daily analysis using state.md + today's delta
 | `TELEGRAM_CHAT_ID` | 目标 Chat/Channel ID | @userinfobot 或 @getidsbot |
 | `NEWS_API_KEY` | NewsAPI 密钥（可选） | newsapi.org |
 | `GEMINI_API_KEY` | Gemini API 密钥（日常分析 fallback，bootstrap 不使用） | aistudio.google.com |
+| `TAVILY_API_KEY` | Tavily API 密钥（bootstrap 定向查询专用，支持 ISW/ICG 域名锁定） | app.tavily.com |
 
 ### 5.3 workflow 文件结构（补充）
 
