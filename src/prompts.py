@@ -83,7 +83,7 @@ SUBMIT_ANALYSIS_TOOL = {
             },
             "updated_state_document": {
                 "type": "string",
-                "description": "完整的更新后状态文档（Markdown格式，供明日分析使用，≤1000字）",
+                "description": "完整的更新后状态文档（Markdown格式，供明日分析使用，≤1000字）。每条事实性陈述必须附上 Markdown 链接引用，格式为 `([媒体名](URL), YYYY-MM-DD)`，URL 取自今日增量新闻的 url 字段。",
             },
         },
         "required": [
