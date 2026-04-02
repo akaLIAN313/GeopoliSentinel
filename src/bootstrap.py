@@ -67,18 +67,24 @@ STATE_PATH = ROOT / "data" / "state.md"
 
 TAVILY_QUERIES: list[dict] = [
     {
-        "label": "军事异动与代理人网络 (ISW)",
+        # ISW publishes daily Iran Updates — best open-source tracker of proxy
+        # network activity and IRGC/militia operational tempo.
+        "label": "地区代理人网络 (ISW)",
         "query": (
-            "Iran Iraq Syria Hezbollah Houthi militia military activity IRGC "
-            "US CENTCOM strikes latest update"
+            "Hezbollah military capability recovery rocket arsenal "
+            "Houthi Red Sea attacks Iraqi Shia militia US base strikes "
+            "Iran proxy coordination IRGC Quds Force latest"
         ),
         "include_domains": ["understandingwar.org"],
         "max_results": 5,
     },
     {
+        # ICG covers Israeli domestic politics and Iran regime dynamics with
+        # analytical depth that open-web searches rarely match.
         "label": "地区冲突动态 (ICG)",
         "query": (
-            "Israel Iran Middle East conflict crisis analysis latest"
+            "Israel Iran Middle East conflict crisis ceasefire diplomacy "
+            "escalation analysis latest"
         ),
         "include_domains": ["crisisgroup.org"],
         "max_results": 4,
@@ -87,7 +93,7 @@ TAVILY_QUERIES: list[dict] = [
         "label": "以色列内政危机",
         "query": (
             "Netanyahu corruption trial verdict Ben-Gvir Smotrich coalition "
-            "collapse Israel domestic protest 2025"
+            "collapse Israel domestic protest election 2025 2026"
         ),
         "include_domains": [],
         "max_results": 4,
@@ -96,7 +102,7 @@ TAVILY_QUERIES: list[dict] = [
         "label": "伊朗经济与政权稳定性",
         "query": (
             "Iranian Rial exchange rate inflation unemployment IRGC economy "
-            "Khamenei succession protest 2025"
+            "Khamenei health succession protest 2025 2026"
         ),
         "include_domains": [],
         "max_results": 4,
@@ -104,8 +110,20 @@ TAVILY_QUERIES: list[dict] = [
     {
         "label": "伊朗核谈判与IAEA",
         "query": (
-            "Iran JCPOA nuclear deal negotiations uranium enrichment 60 percent "
-            "IAEA report 2025"
+            "Iran JCPOA nuclear deal negotiations uranium enrichment "
+            "IAEA access report 2025 2026"
+        ),
+        "include_domains": [],
+        "max_results": 4,
+    },
+    {
+        # US posture is a key CRI modifier — carrier presence, joint strikes,
+        # and diplomatic red lines all directly affect escalation calculus.
+        "label": "美国军事态势与CENTCOM",
+        "query": (
+            "US CENTCOM carrier strike group Middle East deployment "
+            "airstrikes Iran targets Trump Israel military support "
+            "ceasefire pressure diplomacy 2025 2026"
         ),
         "include_domains": [],
         "max_results": 4,
@@ -196,9 +214,10 @@ def build_bootstrap_message(research: dict[str, str]) -> str:
     today = date.today().isoformat()
     sections = [
         f"## 调研背景\n\n"
-        f"以下是通过 Tavily 检索得到的5个方向最新情报，检索日期：{today}。\n"
-        f"前两个方向（ISW、ICG）为权威智库一手分析；后三个方向为开放网络检索。\n"
+        f"以下是通过 Tavily 检索得到的6个方向最新情报，检索日期：{today}。\n"
+        f"前两个方向（ISW、ICG）为权威智库一手分析；后四个方向为开放网络检索。\n"
         f"请综合所有信息，生成初始状态文档（updated_state_document 字段），"
+        f"状态文档必须包含所有规定章节（含「地区代理人网络态势」和「美国军事与外交态势」），"
         f"并给出压力评分、CRI、摘要和关键信号的初始估计值。"
     ]
     # Preserve insertion order so ISW/ICG always appear first in context
