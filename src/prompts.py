@@ -17,7 +17,14 @@ def _read(filename: str) -> str:
 
 def load_daily_system_prompt() -> str:
     """Assemble the system prompt used in every daily analysis run."""
-    return _read("diversionary_war_theory.md") + "\n\n" + _read("analysis_instructions.md")
+    # circuit_breaker_protocol has highest priority — prepended before war theory
+    return (
+        _read("circuit_breaker_protocol.md")
+        + "\n\n"
+        + _read("diversionary_war_theory.md")
+        + "\n\n"
+        + _read("analysis_instructions.md")
+    )
 
 
 def load_bootstrap_system_prompt() -> str:
