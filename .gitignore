@@ -10,5 +10,4 @@ __pycache__/
 
 # Phase 1 intermediate artifact — regenerated every run, not needed in history
 data/articles.json
-
-# Persist everything else in data/ (state.md, latest_report.json, history/)
+data/history

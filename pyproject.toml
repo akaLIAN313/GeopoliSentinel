@@ -8,5 +8,6 @@ dependencies = [
     "feedparser>=6.0.12",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.2",
+    "python-telegram-bot>=20.0",
     "requests>=2.33.1",
 ]
