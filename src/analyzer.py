@@ -39,6 +39,7 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent))
 from fetcher import load_articles, run_pipeline, save_articles
 from models import Article, ResonanceReport
+from polymarket import fetch_and_save as fetch_polymarket
 from prompts import load_daily_system_prompt, SUBMIT_ANALYSIS_TOOL
 
 logger = logging.getLogger(__name__)
@@ -225,6 +226,13 @@ def run_analysis(articles: list[Article]) -> ResonanceReport:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    # Step 0: snapshot Polymarket odds
+    logger.info("=== Phase 0: fetching Polymarket odds ===")
+    try:
+        fetch_polymarket()
+    except Exception as exc:
+        logger.warning("Polymarket fetch failed (non-fatal): %s", exc)
 
     # Step 1: run the data pipeline
     logger.info("=== Phase 1: fetching delta articles ===")
